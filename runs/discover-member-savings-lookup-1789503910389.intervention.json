@@ -1,0 +1,12 @@
+{
+  "intervention_id": "9fe70a1f-9aa7-4794-a738-1113a17e53e1",
+  "run_id": "discover-member-savings-lookup-1789503910389",
+  "capability_id": "member-savings-lookup",
+  "mode": "discovery",
+  "step_id": "step-2",
+  "reason": "3 consecutive action failures -- likely stuck.",
+  "current_url": "http://localhost:4000/login",
+  "screenshot_path": "evidence/discover-member-savings-lookup-1789503910389/screenshots/01-escalation.png",
+  "created_at": "2026-09-15T20:26:23.141577+00:00",
+  "status": "pending"
+}

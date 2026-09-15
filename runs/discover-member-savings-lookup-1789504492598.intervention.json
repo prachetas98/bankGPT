@@ -1,0 +1,12 @@
+{
+  "intervention_id": "0b8fdd11-8d46-4ab5-aca2-157c6a396e9e",
+  "run_id": "discover-member-savings-lookup-1789504492598",
+  "capability_id": "member-savings-lookup",
+  "mode": "discovery",
+  "step_id": "step-2",
+  "reason": "Model repeated the same action (navigate) 3 times in a row without progressing -- likely stuck in a loop.",
+  "current_url": "http://localhost:4000/login",
+  "screenshot_path": "evidence/discover-member-savings-lookup-1789504492598/screenshots/01-escalation.png",
+  "created_at": "2026-09-15T20:36:05.945533+00:00",
+  "status": "pending"
+}

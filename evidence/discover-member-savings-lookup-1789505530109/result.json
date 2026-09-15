@@ -1,0 +1,9 @@
+{
+  "status": "success",
+  "run_id": "discover-member-savings-lookup-1789505530109",
+  "capability_id": "member-savings-lookup",
+  "outputs": {
+    "member_savings_balance": "$4,213.55"
+  },
+  "evidence_dir": "evidence/discover-member-savings-lookup-1789505530109"
+}

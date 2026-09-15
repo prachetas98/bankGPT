@@ -1,0 +1,15 @@
+{
+  "allowed_domains": ["localhost:4000", "127.0.0.1:4000"],
+  "allowed_route_patterns": [
+    "^/login$",
+    "^/logout$",
+    "^/search$",
+    "^/member/[^/]+$",
+    "^/member/[^/]+/new-subaccount$",
+    "^/member/[^/]+/new-subaccount/confirm$"
+  ],
+  "allowed_action_types": ["navigate", "click", "type", "select_option", "extract", "wait_for", "assert_visible"],
+  "risky_locator_name_patterns": ["confirm", "submit transfer", "delete", "close account", "approve"],
+  "irreversible_action_policy": "require_approval",
+  "sensitive_field_name_patterns": ["password", "ssn", "dob", "pin", "cvv", "account.?number", "token", "secret"]
+}

@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.env
+*.log
+
+# Runtime output — real evidence/runs are produced locally when you execute
+# the system. We keep a curated sample under evidence/ committed on purpose;
+# everything else generated at runtime is ignored.
+runs/*
+!runs/.gitkeep
+evidence/*
+!evidence/.gitkeep
+!evidence/README.md
+!evidence/sample-discovery-run/
+!evidence/sample-replay-run/
+!evidence/sample-replay-error-run/
+
+artifacts/*.generated.json

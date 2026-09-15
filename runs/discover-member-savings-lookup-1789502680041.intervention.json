@@ -1,0 +1,12 @@
+{
+  "intervention_id": "9e332aa8-fa06-480b-b264-e54fd88693bf",
+  "run_id": "discover-member-savings-lookup-1789502680041",
+  "capability_id": "member-savings-lookup",
+  "mode": "discovery",
+  "step_id": "loop-boundary",
+  "reason": "Reached max step count (20) without completing the goal.",
+  "current_url": "http://localhost:4000/search",
+  "screenshot_path": "evidence/discover-member-savings-lookup-1789502680041/screenshots/01-escalation.png",
+  "created_at": "2026-09-15T20:15:37.412617+00:00",
+  "status": "pending"
+}

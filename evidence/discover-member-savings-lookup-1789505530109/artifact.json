@@ -1,0 +1,352 @@
+{
+  "schema_version": "1.0",
+  "id": "member-savings-lookup",
+  "version": "1.0.0",
+  "name": "member-savings-lookup",
+  "description": "Look up member 12345 and read their current savings balance",
+  "approval_state": "draft",
+  "provenance": {
+    "discovery_run_id": "discover-member-savings-lookup-1789505530109",
+    "model": "microsoft/Phi-3.5-mini-instruct",
+    "created_at": "2026-09-15T20:54:15.035766+00:00",
+    "recorded_goal": "Look up member 12345 and read their current savings balance"
+  },
+  "target": {
+    "app_id": "bankgpt-member-services",
+    "base_url": "http://localhost:4000",
+    "entry_path": "/login"
+  },
+  "inputs": [],
+  "outputs": [
+    {
+      "name": "member_savings_balance",
+      "type": "string",
+      "description": "The current savings balance of member 12345, which is $4,213.55",
+      "transform": "none"
+    }
+  ],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "To access the member's account information, I need to log in first.",
+      "action": "click",
+      "risk": "safe",
+      "requires_approval": false,
+      "url": null,
+      "locator": {
+        "primary": {
+          "strategy": "role",
+          "value": "button",
+          "role_name": "Sign In"
+        },
+        "fallbacks": [
+          {
+            "strategy": "label",
+            "value": "Sign In",
+            "role_name": null
+          },
+          {
+            "strategy": "css",
+            "value": "form > table > tbody > tr:nth-of-type(3) > td:nth-of-type(2) > input",
+            "role_name": null
+          },
+          {
+            "strategy": "xpath",
+            "value": "/html[1]/body[1]/div[2]/form[1]/table[1]/tbody[1]/tr[3]/td[2]/input[1]",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Accessible role + name: stable across CSS refactors and re-theming, which is the common failure mode on enterprise apps that reskin without changing behavior.",
+        "element_ref": null
+      },
+      "value": null,
+      "output_name": null,
+      "wait": null,
+      "checkpoint": {
+        "kind": "url_matches",
+        "pattern": "/search",
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-2",
+      "description": "I need to enter the member ID to search for their account information.",
+      "action": "type",
+      "risk": "safe",
+      "requires_approval": false,
+      "url": null,
+      "locator": {
+        "primary": {
+          "strategy": "css",
+          "value": "input[name=\"memberId\"]",
+          "role_name": null
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": "form > table > tbody > tr:nth-of-type(1) > td:nth-of-type(2) > input",
+            "role_name": null
+          },
+          {
+            "strategy": "xpath",
+            "value": "/html[1]/body[1]/div[2]/form[1]/table[1]/tbody[1]/tr[1]/td[2]/input[1]",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Structural/attribute CSS fallback used because no accessible role+name or id was available on this <input>.",
+        "element_ref": null
+      },
+      "value": {
+        "source": "literal",
+        "value": "12345"
+      },
+      "output_name": null,
+      "wait": null,
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": {
+            "strategy": "css",
+            "value": "input[name=\"memberId\"]",
+            "role_name": null
+          },
+          "fallbacks": [
+            {
+              "strategy": "css",
+              "value": "form > table > tbody > tr:nth-of-type(1) > td:nth-of-type(2) > input",
+              "role_name": null
+            },
+            {
+              "strategy": "xpath",
+              "value": "/html[1]/body[1]/div[2]/form[1]/table[1]/tbody[1]/tr[1]/td[2]/input[1]",
+              "role_name": null
+            }
+          ],
+          "robustness_note": "Structural/attribute CSS fallback used because no accessible role+name or id was available on this <input>.",
+          "element_ref": null
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-3",
+      "description": "Since I've already entered the member ID into the search box, I should initiate the search to find their dashboard.",
+      "action": "click",
+      "risk": "safe",
+      "requires_approval": false,
+      "url": null,
+      "locator": {
+        "primary": {
+          "strategy": "role",
+          "value": "button",
+          "role_name": "Search"
+        },
+        "fallbacks": [
+          {
+            "strategy": "label",
+            "value": "Search",
+            "role_name": null
+          },
+          {
+            "strategy": "css",
+            "value": "form > table > tbody > tr:nth-of-type(2) > td:nth-of-type(2) > input",
+            "role_name": null
+          },
+          {
+            "strategy": "xpath",
+            "value": "/html[1]/body[1]/div[2]/form[1]/table[1]/tbody[1]/tr[2]/td[2]/input[1]",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Accessible role + name: stable across CSS refactors and re-theming, which is the common failure mode on enterprise apps that reskin without changing behavior.",
+        "element_ref": null
+      },
+      "value": null,
+      "output_name": null,
+      "wait": null,
+      "checkpoint": {
+        "kind": "url_matches",
+        "pattern": "/member/12345",
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-4",
+      "description": "I've successfully navigated to the member's dashboard, and now I need to read their current savings balance.",
+      "action": "extract",
+      "risk": "safe",
+      "requires_approval": false,
+      "url": null,
+      "locator": {
+        "primary": {
+          "strategy": "css",
+          "value": "#balance-cell",
+          "role_name": null
+        },
+        "fallbacks": [
+          {
+            "strategy": "text",
+            "value": "$4,213.55",
+            "role_name": null
+          },
+          {
+            "strategy": "css",
+            "value": "#balance-cell",
+            "role_name": null
+          },
+          {
+            "strategy": "xpath",
+            "value": "/html[1]/body[1]/div[2]/table[1]/tbody[1]/tr[3]/td[2]",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Stable id attribute; degrades to name/structural CSS if the id is ever removed.",
+        "element_ref": null
+      },
+      "value": null,
+      "output_name": "member_savings_balance",
+      "wait": null,
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": {
+            "strategy": "css",
+            "value": "#balance-cell",
+            "role_name": null
+          },
+          "fallbacks": [
+            {
+              "strategy": "text",
+              "value": "$4,213.55",
+              "role_name": null
+            },
+            {
+              "strategy": "css",
+              "value": "#balance-cell",
+              "role_name": null
+            },
+            {
+              "strategy": "xpath",
+              "value": "/html[1]/body[1]/div[2]/table[1]/tbody[1]/tr[3]/td[2]",
+              "role_name": null
+            }
+          ],
+          "robustness_note": "Stable id attribute; degrades to name/structural CSS if the id is ever removed.",
+          "element_ref": null
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    }
+  ],
+  "recognized_outcomes": [
+    {
+      "id": "member-not-found",
+      "description": "Search returned no matching member.",
+      "check_after_step_id": "step-3",
+      "locator": {
+        "primary": {
+          "strategy": "text",
+          "value": "No member found matching ID",
+          "role_name": null
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": ".error",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Exact banner copy from views.py; falls back to the generic .error banner class if copy changes.",
+        "element_ref": null
+      },
+      "kind": "business",
+      "business_outcome_code": "MEMBER_NOT_FOUND",
+      "recovery_action": null,
+      "escalation_reason": null
+    },
+    {
+      "id": "permission-denied",
+      "description": "Operator does not have permission to view this member.",
+      "check_after_step_id": "step-3",
+      "locator": {
+        "primary": {
+          "strategy": "text",
+          "value": "Access Denied",
+          "role_name": null
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": ".error",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Exact banner copy from views.py; falls back to the generic .error banner class if copy changes.",
+        "element_ref": null
+      },
+      "kind": "business",
+      "business_outcome_code": "PERMISSION_DENIED",
+      "recovery_action": null,
+      "escalation_reason": null
+    },
+    {
+      "id": "session-expired",
+      "description": "Session expired mid-flow and the app redirected to the login screen.",
+      "check_after_step_id": "step-3",
+      "locator": {
+        "primary": {
+          "strategy": "text",
+          "value": "Your session has expired",
+          "role_name": null
+        },
+        "fallbacks": [
+          {
+            "strategy": "css",
+            "value": ".notice",
+            "role_name": null
+          }
+        ],
+        "robustness_note": "Exact notice copy from views.py on the login screen; falls back to the generic .notice banner class.",
+        "element_ref": null
+      },
+      "kind": "escalate",
+      "business_outcome_code": null,
+      "recovery_action": null,
+      "escalation_reason": "Session expired mid-flow; re-authentication requires a human or a provisioned service credential this artifact does not have."
+    }
+  ],
+  "final_checkpoint": {
+    "kind": "element_visible",
+    "locator": {
+      "primary": {
+        "strategy": "css",
+        "value": "#balance-cell",
+        "role_name": null
+      },
+      "fallbacks": [
+        {
+          "strategy": "text",
+          "value": "$4,213.55",
+          "role_name": null
+        },
+        {
+          "strategy": "css",
+          "value": "#balance-cell",
+          "role_name": null
+        },
+        {
+          "strategy": "xpath",
+          "value": "/html[1]/body[1]/div[2]/table[1]/tbody[1]/tr[3]/td[2]",
+          "role_name": null
+        }
+      ],
+      "robustness_note": "Stable id attribute; degrades to name/structural CSS if the id is ever removed.",
+      "element_ref": null
+    },
+    "timeout_ms": 10000
+  }
+}

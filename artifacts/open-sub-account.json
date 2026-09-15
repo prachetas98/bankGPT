@@ -1,0 +1,311 @@
+{
+  "schema_version": "1.0",
+  "id": "open-sub-account",
+  "version": "1.0.0",
+  "name": "Open a new sub-account for a member",
+  "description": "Logs in, finds a member, opens a new sub-account of a given type and initial deposit, and completes it after human approval of the final (irreversible) confirmation step.",
+  "approval_state": "draft",
+  "provenance": {
+    "discovery_run_id": "hand-authored-not-from-live-discovery",
+    "model": "n/a",
+    "created_at": "2026-01-01T00:00:00.000Z",
+    "recorded_goal": "Open a new sub-account for this member and reach the confirmation screen."
+  },
+  "target": {
+    "app_id": "bankgpt-member-services",
+    "base_url": "http://localhost:4000",
+    "entry_path": "/login"
+  },
+  "inputs": [
+    { "name": "operator_username", "type": "string", "required": true, "description": "Login username for the back-office session.", "example": "demo-operator", "sensitive": false },
+    { "name": "operator_password", "type": "string", "required": true, "description": "Login password for the back-office session.", "sensitive": true },
+    { "name": "member_id", "type": "string", "required": true, "description": "Member to open the sub-account for.", "example": "12345", "sensitive": false },
+    { "name": "account_type", "type": "string", "required": true, "description": "One of: savings, checking, cd.", "example": "savings", "sensitive": false },
+    { "name": "initial_deposit", "type": "number", "required": true, "description": "Initial deposit amount in USD; must be >= 25.00.", "example": "100", "sensitive": false }
+  ],
+  "outputs": [
+    { "name": "account_number", "type": "string", "description": "The newly created sub-account number.", "transform": "trim" }
+  ],
+  "steps": [
+    {
+      "id": "step-1",
+      "description": "Go to the sign-in screen.",
+      "action": "navigate",
+      "risk": "safe",
+      "requires_approval": false,
+      "url": "{{base_url}}/login",
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "input[name=\"username\"]" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='username']" }],
+          "robustness_note": "No accessible name available on this legacy form field (no <label for>), so the name attribute is the strongest signal."
+        },
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-2",
+      "description": "Enter the operator username.",
+      "action": "type",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "css", "value": "input[name=\"username\"]" },
+        "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='username']" }],
+        "robustness_note": "Same as step-1's checkpoint locator."
+      },
+      "value": { "source": "param", "param": "operator_username" },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "input[name=\"username\"]" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='username']" }],
+          "robustness_note": "Field is still visible after typing; strong signal only that we haven't navigated away unexpectedly."
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-3",
+      "description": "Enter the operator password.",
+      "action": "type",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "css", "value": "input[name=\"password\"]" },
+        "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='password']" }],
+        "robustness_note": "No accessible name on this legacy form field; name attribute is the strongest signal. Value itself is sourced from a parameter flagged sensitive: never a literal in this artifact."
+      },
+      "value": { "source": "param", "param": "operator_password" },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "input[name=\"password\"]" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='password']" }],
+          "robustness_note": "Field still visible after typing."
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-4",
+      "description": "Submit sign-in.",
+      "action": "click",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "role", "value": "button", "role_name": "Sign In" },
+        "fallbacks": [
+          { "strategy": "css", "value": "input[type=\"submit\"]" },
+          { "strategy": "xpath", "value": "//input[@type='submit']" }
+        ],
+        "robustness_note": "Accessible name comes from the submit input's value attribute ('Sign In'); survives re-theming better than a CSS selector would."
+      },
+      "checkpoint": {
+        "kind": "url_matches",
+        "pattern": "/search",
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-5",
+      "description": "Enter the member id to search for.",
+      "action": "type",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "css", "value": "input[name=\"memberId\"]" },
+        "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='memberId']" }],
+        "robustness_note": "No accessible name available; name attribute fallback typical of legacy server-rendered forms."
+      },
+      "value": { "source": "param", "param": "member_id" },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "input[name=\"memberId\"]" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='memberId']" }],
+          "robustness_note": "Field still visible after typing."
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-6",
+      "description": "Submit the search.",
+      "action": "click",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "role", "value": "button", "role_name": "Search" },
+        "fallbacks": [{ "strategy": "css", "value": "input[type=\"submit\"]" }],
+        "robustness_note": "Accessible name from the submit input's value ('Search')."
+      },
+      "checkpoint": {
+        "kind": "url_matches",
+        "pattern": "/member/[^/]+",
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-7",
+      "description": "Open the new sub-account form for this member.",
+      "action": "click",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "role", "value": "link", "role_name": "Open New Sub-Account" },
+        "fallbacks": [{ "strategy": "text", "value": "Open New Sub-Account" }],
+        "robustness_note": "Anchor's accessible name comes directly from its link text, which is also the most legible signal a reviewer can check by eye."
+      },
+      "checkpoint": {
+        "kind": "url_matches",
+        "pattern": "/member/[^/]+/new-subaccount",
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-8",
+      "description": "Choose the sub-account type.",
+      "action": "select_option",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "css", "value": "select[name=\"accountType\"]" },
+        "fallbacks": [{ "strategy": "xpath", "value": "//select[@name='accountType']" }],
+        "robustness_note": "No accessible name on this <select>; name attribute is the strongest signal."
+      },
+      "value": { "source": "param", "param": "account_type" },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "select[name=\"accountType\"]" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//select[@name='accountType']" }],
+          "robustness_note": "Field still visible after selecting."
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-9",
+      "description": "Enter the initial deposit amount.",
+      "action": "type",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "css", "value": "input[name=\"initialDeposit\"]" },
+        "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='initialDeposit']" }],
+        "robustness_note": "No accessible name on this field; name attribute fallback."
+      },
+      "value": { "source": "param", "param": "initial_deposit" },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "input[name=\"initialDeposit\"]" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//input[@name='initialDeposit']" }],
+          "robustness_note": "Field still visible after typing."
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-10",
+      "description": "Continue to the confirmation screen.",
+      "action": "click",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "role", "value": "button", "role_name": "Continue" },
+        "fallbacks": [{ "strategy": "css", "value": "input[type=\"submit\"]" }],
+        "robustness_note": "Accessible name from the submit input's value ('Continue')."
+      },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "role", "value": "button", "role_name": "Confirm" },
+          "fallbacks": [{ "strategy": "text", "value": "Confirm" }],
+          "robustness_note": "Presence of the Confirm button is a stronger signal of 'reached the confirmation screen' than a URL check, since this POST re-renders the same path either way -- and correctly FAILS if a validation error redisplayed the form instead (see recognized_outcomes)."
+        },
+        "timeout_ms": 8000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-11",
+      "description": "Confirm and finalize the new sub-account. Irreversible: requires human approval before replay will execute it.",
+      "action": "click",
+      "risk": "irreversible",
+      "requires_approval": true,
+      "locator": {
+        "primary": { "strategy": "role", "value": "button", "role_name": "Confirm" },
+        "fallbacks": [{ "strategy": "text", "value": "Confirm" }],
+        "robustness_note": "Same locator as step-10's checkpoint. Matches the policy engine's risky-name pattern ('confirm') independently as defense in depth."
+      },
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "text", "value": "New sub-account opened" },
+          "fallbacks": [{ "strategy": "css", "value": ".success" }],
+          "robustness_note": "Exact success banner copy from views.py; falls back to the generic .success class."
+        },
+        "timeout_ms": 10000
+      },
+      "timeout_ms": 10000
+    },
+    {
+      "id": "step-12",
+      "description": "Read back the new account number.",
+      "action": "extract",
+      "risk": "safe",
+      "requires_approval": false,
+      "locator": {
+        "primary": { "strategy": "css", "value": "table tr:nth-of-type(1) td:nth-of-type(2)" },
+        "fallbacks": [{ "strategy": "xpath", "value": "//table/tr[1]/td[2]" }],
+        "robustness_note": "Structural locator: legacy success page has no id/test-id on the account number cell, only a fixed table position. Brittle to layout changes, called out explicitly rather than hidden."
+      },
+      "output_name": "account_number",
+      "checkpoint": {
+        "kind": "element_visible",
+        "locator": {
+          "primary": { "strategy": "css", "value": "table tr:nth-of-type(1) td:nth-of-type(2)" },
+          "fallbacks": [{ "strategy": "xpath", "value": "//table/tr[1]/td[2]" }],
+          "robustness_note": "Same as this step's locator."
+        },
+        "timeout_ms": 5000
+      },
+      "timeout_ms": 10000
+    }
+  ],
+  "recognized_outcomes": [
+    {
+      "id": "invalid-initial-deposit",
+      "description": "Initial deposit was below the minimum allowed.",
+      "check_after_step_id": "step-10",
+      "kind": "business",
+      "business_outcome_code": "INVALID_INITIAL_DEPOSIT",
+      "locator": {
+        "primary": { "strategy": "text", "value": "Initial deposit must be at least" },
+        "fallbacks": [{ "strategy": "css", "value": ".error" }],
+        "robustness_note": "Exact validation copy from views.py; falls back to the generic .error banner class."
+      }
+    }
+  ],
+  "final_checkpoint": {
+    "kind": "element_visible",
+    "locator": {
+      "primary": { "strategy": "text", "value": "New sub-account opened" },
+      "fallbacks": [{ "strategy": "css", "value": ".success" }],
+      "robustness_note": "Confirms the overall goal state, independent of any single step's own checkpoint."
+    },
+    "timeout_ms": 10000
+  }
+}
