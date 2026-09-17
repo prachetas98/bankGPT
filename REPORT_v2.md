@@ -39,60 +39,6 @@ things to actually touch the screen and stay safe:
 7. If anything goes wrong or needs a judgment call, **Escalation** (pink box) pauses the run and
    hands the screen to a real person.
 
-**Why I built it this way:**
-
-- **Python + Pydantic for the schema.** The artifact is a file other code depends on, so I wanted
-  one clear definition of its shape, checked automatically at runtime, instead of a hand-written
-  spec that could go out of date.
-- **A free, local AI model instead of a paid API.** I use Microsoft's Phi-3.5-mini-instruct. It is
-  small (3.8B), free, and needs no account or API key. Two other models I looked at first (Gemma)
-  needed you to accept a license and log in — that would have broken the "no account needed" goal,
-  so I skipped them. `llm_client.py` is the only file that knows which model is running. Every
-  other file just sees a simple decision object back — swapping the model later would not touch
-  anything else.
-
-  The downside: a small free model is less reliable than a big paid one. It has no built-in way to
-  call tools, so I built a simple system myself: the prompt tells the model exactly what shape of
-  answer to send back, and my code checks that answer by hand. A run is more likely to need a
-  retry or ask for human help than it would with a stronger paid model. I accepted that trade-off
-  on purpose, so the whole system runs for free with no API key anywhere. It also runs faster on a
-  GPU than a CPU — minutes per step on CPU versus a few seconds per step on GPU, in my own testing.
-
-  I ran this for real, and it broke in three specific ways before I fixed it. Each one taught me
-  something:
-  1. The model would explain the right idea ("don't type into this field again") but then still
-     do the wrong thing anyway. The reason: I was asking it to say *what* it would do before
-     asking it to say *why*. Since the model writes one word at a time, it had already committed
-     to the wrong action before writing its own reasoning. Fix: ask for the reasoning first, then
-     the action.
-  2. The model kept repeating the exact same action forever. The reason: I had it always pick the
-     single most likely next word. If the screen doesn't change, the most likely word never
-     changes either, so it loops forever. Fix: allow a little randomness in its choices, so it can
-     break out of the loop.
-  3. When the model sent back a slightly wrong answer, my code crashed with a raw error message
-     like `Error: 'value'`, and fed that back to the model. That message meant nothing to the
-     model, so it couldn't fix its mistake. Fix: replace raw crashes with plain, specific error
-     messages the model can actually act on.
-- **Reading the screen directly from the page's HTML, not from a screenshot.** My code pulls the
-  buttons, links, and fields straight from the page (`playwright_adapter.py`). This is the same
-  information the AI model sees and the same information used to build reliable Replay steps — one
-  source of truth instead of two.
-
-  **A real bug this caused:** at first, my code only looked at things you can click or type into.
-  It skipped over plain read-only text, like a balance shown in a table cell. So when the goal was
-  just "read this balance," the model couldn't see the answer anywhere on the screen, and got
-  confused. Fix: also read any element that has an `id`, and treat it as readable text if it's not
-  a button or field. Now the model can see and report values, not just click things.
-- **One test app, built by me, on purpose old-looking.** Plain HTML tables, no modern web
-  developer shortcuts. I built it this way so I could reliably create the exact situations the
-  assignment asks for — "member not found," "not allowed," "session expired" — on demand, whenever
-  I needed to test them.
-
-**A choice I made on purpose:** Discovery and Replay are two separate pieces of code, not one
-combined piece. I thought about merging them, but their jobs are actually different: Discovery's
-job is "figure out what to do," and Replay's job is "check that what's expected actually happened."
-Merging them would have hidden that difference instead of making it clear.
-
 ## 2. Artifact schema
 
 The **Capability Artifact** is a single file that describes one task completely: what it needs,
