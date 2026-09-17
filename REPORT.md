@@ -5,8 +5,11 @@
 The system has two modes: **Discovery** and **Replay**. They share three parts underneath them.
 Look at the diagram below while you read this section — the names match exactly.
 
+Here is the system diagram:
 <img width="1400" height="900" alt="bankgpt_architecture" src="https://github.com/user-attachments/assets/7e735c14-e066-46c7-be2b-45e0e0ac4aa5" />
 
+Here is the corresponding interactive diagram as well:
+<img width="1400" height="1060" alt="bankgpt_discovery_sequence" src="https://github.com/user-attachments/assets/535feffe-39a2-457e-8deb-12123006c637" />
 
 **The two modes (top of the diagram):**
 
