@@ -2,291 +2,251 @@
 
 ## 1. Architecture
 
-The system has two separate modes that share three components: a **Surface Adapter**
-(`src/surface/`), a **Policy Engine** (`src/policy/`), and an **Evidence Store**
-(`src/evidence/`). Nothing above the adapter knows it's talking to Playwright/Chromium. Nothing
-touches the live UI without going through the policy engine first.
+The system has two modes: **Discovery** and **Replay**. They share three parts underneath them.
+Look at the diagram below while you read this section — the names match exactly.
 
-<img width="1400" height="900" alt="bankgpt_architecture" src="https://github.com/user-attachments/assets/15f84d4d-b9bb-43cb-afad-7d43e6e15f6f" />
+<img width="1400" height="900" alt="bankgpt_architecture" src="https://github.com/user-attachments/assets/7e735c14-e066-46c7-be2b-45e0e0ac4aa5" />
 
 
-Both modes use the same `SurfaceAdapter`, the same `PolicyEngine`, and the same `EvidenceStore`.
-The only difference between them is who picks the next action: the LLM (once, during discovery)
-or the saved artifact (every time after, during replay).
+**The two modes (top of the diagram):**
 
-- **Discovery** (`src/agent/discovery_agent.py`): an LLM-driven loop that observes, decides, and
-  acts. Each turn, the adapter reads the page — a short list of interactive and read-only
-  elements with roles and names, not raw HTML (see §4). The model picks one tool call from a fixed
-  action list (`src/agent/tools.py`). That action goes through the policy engine, then the adapter
-  runs it. When the run succeeds, a **Recorder** (`src/recorder/recorder.py`) turns the trace into
-  a **Capability Artifact**.
-- **Replay** (`src/replay/replay_executor.py`): walks an artifact's steps using the same adapter
-  and policy engine. After each action it checks a checkpoint, and if that checkpoint fails, it
-  classifies the failure using an **error taxonomy** (`src/replay/error_taxonomy.py`) instead of
-  guessing. No LLM call happens anywhere in this path.
-- **Escalation** (`src/escalation/`) can pause either loop and hand the same live browser session
-  to a human — through a small operator page plus the browser's own CDP debugging endpoint — then
-  resume once a person resolves it.
+- **Discovery** (blue box) runs once per task. An AI model watches the screen, decides what to
+  click or type, and does it. This is slow and needs an AI model, but it only has to happen once
+  per task.
+- **Replay** (green box) runs every time after that. It follows the exact steps saved from
+  Discovery. It does not use an AI model at all. This is fast and always behaves the same way.
 
-**Key decisions, and why:**
+**The shared parts underneath (amber boxes):** both Discovery and Replay use the exact same three
+things to actually touch the screen and stay safe:
 
-- **Python + Pydantic for the schema.** The artifact is a contract other code depends on, so I
-  wanted one source of truth with runtime validation (`src/types/artifact.py`) instead of a
-  hand-maintained JSON Schema that could drift out of sync. Pydantic v2's discriminated unions do
-  the same job Zod's `discriminatedUnion` does in TypeScript.
-- **A local, free model — Microsoft Phi-3.5-mini-instruct (3.8B, MIT-licensed) — instead of a
-  hosted API.** I picked it because it needs no HuggingFace license approval. Two Gemma checkpoints
-  I looked at first both required accepting a license and logging in, which defeats the goal of a
-  setup with zero accounts. `src/agent/llm_client.py` is the only file in the codebase that knows
-  which model is running — `DiscoveryAgent` only depends on the `LlmDecision` shape that `decide()`
-  returns, never on how that shape was produced. (None of the tests touch an LLM at all — see
-  `test_error_taxonomy.py` and the rest of the suite.)
+- **Surface Adapter** — the only piece of code allowed to click, type, or read the screen. Both
+  modes call it the same way. Neither mode ever touches the browser directly.
+- **Policy Engine** — checks every single action before it happens. "Is this website allowed? Is
+  this a safe kind of action?" If not, it stops the action and asks a human.
+- **Evidence Store** — writes down everything that happens: every action, every screenshot, every
+  result. This is the audit trail.
 
-  The real cost of this choice: local models have no built-in tool-calling API, so
-  `llm_client.py` writes its own. The prompt spells out the tool menu and the exact JSON shape the
-  model must return (`_tool_menu_text`), and the response is parsed and checked by hand instead of
-  arriving pre-validated. A small instruct model is also just less reliable at multi-step
-  structured output than a frontier model built around tool use. So a discovery run is more likely
-  to need a retry, or to hit `give_up`/escalation, than it would with a stronger hosted model. I
-  accepted that cost on purpose, to keep the one required real run free of any API key, account, or
-  per-call cost — it runs end to end on a plain CPU box with nothing but the model weights. (In
-  practice a GPU is worth having: the same model took minutes per step on CPU and single-digit
-  seconds per step on GPU.)
+**How a task moves through the system, step by step:**
 
-  That reliability cost wasn't hypothetical. Real discovery runs during this project hit three
-  specific, fixable bugs, each one traced from an actual transcript, not guessed at:
-  1. The model would sometimes reason correctly in `rationale` ("this field already has a value,
-     don't type again") but then still pick the *wrong* tool call anyway. Cause: the JSON envelope
-     originally asked for `tool_name` before `rationale`. Since generation runs left to right, the
-     model committed to the action before it had generated the reasoning that should have driven
-     it. Fix: reorder the envelope to `{rationale, tool_name, arguments}`.
-  2. Greedy decoding (`do_sample=False`) is guaranteed to repeat the same action forever once the
-     screen stops changing between turns — for example, after a redundant retype. Fix: switch to
-     light sampling (`temperature=0.4`), which gives the model an actual chance to pick something
-     different once a correction is needed.
-  3. Malformed tool arguments — a `parameter_hint` sent as a bare string instead of an object, a
-     `type` call missing `value` — were crashing with raw Python exceptions (`"Error: 'value'"`)
-     that got fed straight back to the model. That's useless as a self-correction signal. Fix:
-     `_require()` in `discovery_agent.py` replaces the raw exception with a clear, actionable
-     message.
-- **Playwright's synchronous API, and DOM-first perception** (not the accessibility-tree API, not
-  screenshot+coordinates). I pull role, accessible name, and attributes directly via
-  `page.evaluate` (`src/surface/playwright_adapter.py`), so the same code that shows the LLM the
-  page also produces the ranked locator candidates the Recorder needs — one code path instead of
-  two that could drift apart. Screenshot+coordinates is the documented fallback for a future
-  surface with no DOM at all (§4).
+1. Discovery watches the screen, decides on one action, sends it to the Policy Engine.
+2. The Policy Engine checks it's allowed, then hands it to the Surface Adapter.
+3. The Surface Adapter does the click/type on the real screen.
+4. The Evidence Store logs what happened.
+5. If Discovery succeeds, the **Recorder** turns the whole trace into a saved **Capability
+   Artifact** — a file describing the task so it can be repeated later without AI.
+6. Later, Replay reads that file and does the same steps again, through the same Policy Engine and
+   Surface Adapter — no AI involved this time.
+7. If anything goes wrong or needs a judgment call, **Escalation** (pink box) pauses the run and
+   hands the screen to a real person.
 
-  **A real gap this surfaced:** perception originally only matched elements you can click or type
-  into — links, buttons, form fields. Read-only display data, like a balance sitting in a plain
-  `<td>`, was invisible to the model. A goal that's purely "read this value" had nothing to look
-  at, so the model wandered into an unrelated form instead. Fix: also match any element with an
-  `id` attribute (a legacy app's closest thing to a test hook), and give those a synthetic
-  `"text"` role whose value is its text content. Read-only data is now visible to the model, not
-  just clickable controls.
+**Why I built it this way:**
 
-  I used Playwright's **sync** API over the async one on purpose: this is a single-purpose CLI,
-  not a concurrent server, so plain blocking calls keep the control flow — especially the
-  escalation pause/resume — easy to follow. The one place that actually needs concurrency, the
-  operator HTTP page staying reachable while the main flow is blocked waiting on a human, runs in
-  a background thread (`src/escalation/operator_server.py`). That's the standard way to run a
-  small server alongside an otherwise synchronous script.
-- **Flat-file storage, single process, synchronous CLI.** Hundreds of tenants is a real constraint
-  for the design (§4), but building queues and services for a one-tenant demo would be exactly the
-  kind of unnecessary infrastructure the assignment says not to reward. Storage is just
-  `artifacts/*.json`, `evidence/<runId>/`, `runs/<runId>.*.json`.
-- **One target app, built by me, deliberately old-fashioned:** server-rendered tables, no test
-  ids, no ARIA (`target_app/`, a small Flask app). This was the only way to reliably produce the
-  exact runtime states the rubric asks for — not-found, permission-denied, validation error,
-  session timeout — on demand. A public demo site wouldn't let me control that.
+- **Python + Pydantic for the schema.** The artifact is a file other code depends on, so I wanted
+  one clear definition of its shape, checked automatically at runtime, instead of a hand-written
+  spec that could go out of date.
+- **A free, local AI model instead of a paid API.** I use Microsoft's Phi-3.5-mini-instruct. It is
+  small (3.8B), free, and needs no account or API key. Two other models I looked at first (Gemma)
+  needed you to accept a license and log in — that would have broken the "no account needed" goal,
+  so I skipped them. `llm_client.py` is the only file that knows which model is running. Every
+  other file just sees a simple decision object back — swapping the model later would not touch
+  anything else.
 
-**A trade-off I made on purpose:** the discovery loop and the replay engine are separate classes,
-not one "executor with an optional LLM." I considered merging them, but once an LLM is in the
-loop, each step is "decide, then act, then see what happened." Replay's job is different: "assert,
-don't decide." Forcing one abstraction over both would have hidden that difference instead of
-making it clear.
+  The downside: a small free model is less reliable than a big paid one. It has no built-in way to
+  call tools, so I built a simple system myself: the prompt tells the model exactly what shape of
+  answer to send back, and my code checks that answer by hand. A run is more likely to need a
+  retry or ask for human help than it would with a stronger paid model. I accepted that trade-off
+  on purpose, so the whole system runs for free with no API key anywhere. It also runs faster on a
+  GPU than a CPU — minutes per step on CPU versus a few seconds per step on GPU, in my own testing.
+
+  I ran this for real, and it broke in three specific ways before I fixed it. Each one taught me
+  something:
+  1. The model would explain the right idea ("don't type into this field again") but then still
+     do the wrong thing anyway. The reason: I was asking it to say *what* it would do before
+     asking it to say *why*. Since the model writes one word at a time, it had already committed
+     to the wrong action before writing its own reasoning. Fix: ask for the reasoning first, then
+     the action.
+  2. The model kept repeating the exact same action forever. The reason: I had it always pick the
+     single most likely next word. If the screen doesn't change, the most likely word never
+     changes either, so it loops forever. Fix: allow a little randomness in its choices, so it can
+     break out of the loop.
+  3. When the model sent back a slightly wrong answer, my code crashed with a raw error message
+     like `Error: 'value'`, and fed that back to the model. That message meant nothing to the
+     model, so it couldn't fix its mistake. Fix: replace raw crashes with plain, specific error
+     messages the model can actually act on.
+- **Reading the screen directly from the page's HTML, not from a screenshot.** My code pulls the
+  buttons, links, and fields straight from the page (`playwright_adapter.py`). This is the same
+  information the AI model sees and the same information used to build reliable Replay steps — one
+  source of truth instead of two.
+
+  **A real bug this caused:** at first, my code only looked at things you can click or type into.
+  It skipped over plain read-only text, like a balance shown in a table cell. So when the goal was
+  just "read this balance," the model couldn't see the answer anywhere on the screen, and got
+  confused. Fix: also read any element that has an `id`, and treat it as readable text if it's not
+  a button or field. Now the model can see and report values, not just click things.
+- **One test app, built by me, on purpose old-looking.** Plain HTML tables, no modern web
+  developer shortcuts. I built it this way so I could reliably create the exact situations the
+  assignment asks for — "member not found," "not allowed," "session expired" — on demand, whenever
+  I needed to test them.
+
+**A choice I made on purpose:** Discovery and Replay are two separate pieces of code, not one
+combined piece. I thought about merging them, but their jobs are actually different: Discovery's
+job is "figure out what to do," and Replay's job is "check that what's expected actually happened."
+Merging them would have hidden that difference instead of making it clear.
 
 ## 2. Artifact schema
 
-`src/types/artifact.py` is the most important file in the project. Design goals, in order: (1) a
-human reviewer can understand the capability without replaying it, (2) a calling agent can
-validate inputs/outputs automatically, (3) replay can be fully deterministic, (4) it travels
-across tenants with minimal change (§4).
+The **Capability Artifact** is a single file that describes one task completely: what it needs,
+what it does step by step, and what it returns. This is the file Discovery creates and Replay
+reads. `src/types/artifact.py` defines its exact shape.
 
-Shape, briefly:
+What's inside it, in plain terms:
 
-- **`inputs` / `outputs`** — typed, named, described. Inputs carry a `sensitive` flag that drives
-  redaction everywhere downstream. These come straight from the discovery run's own tool calls:
-  when the model types a value it recognizes as coming from the goal (not a fixed constant), it
-  sets a `parameter_hint` (`src/agent/tools.py`). The Recorder trusts that hint instead of guessing
-  afterward which literals "look like" variables.
-- **`steps`** — each one is `{action, locator, value, checkpoint, risk, requires_approval}`.
-  `locator` is a **ranked bundle**, not one selector: a primary plus ordered fallbacks, each with a
-  `robustness_note` explaining why it's ranked where it is (see `src/surface/locator_strategy.py`
-  — role+accessible-name beats id beats name-attribute CSS beats text beats structural CSS beats
-  XPath). Every step checks a `checkpoint` — did we reach the state we expected, not just "did the
-  click not throw an error."
-- **`recognized_outcomes`** — this is the schema's answer to "business outcome vs. recoverable vs.
-  hard failure." Each one names a step to check after, a locator that signals it, a `kind`
-  (`business` / `recoverable` / `escalate`), and what to do about it. This is knowledge someone
-  writes down at record time, not something automatically learned from one successful run — a
-  single discovery run, by definition, never sees its own failure states. `target_app/known_outcomes.py`
-  is the seed data for this demo; in production this would be a registry per `app_id` that a
-  reviewer maintains, not something written per capability.
-- **`target.base_url`** is the one field a tenant override is meant to replace (§4); everything
-  else stays the same across tenants by design.
+- **Inputs / outputs** — what the task needs to run (like a member ID) and what it gives back
+  (like a balance). Inputs marked `sensitive` (like a password) get hidden everywhere the system
+  writes logs.
+- **Steps** — an ordered list of actions: click this, type that, check this loaded. Each step
+  saves several ways to find the same element on screen (not just one), ranked from most reliable
+  to least reliable. If the top way fails, the system tries the next one down the list before
+  giving up.
+- **Recognized outcomes** — a list of "known situations" for each step, like "member not found" or
+  "session expired," and what to do if one happens: treat it as a normal result, retry once, or
+  ask a human. I write these down by hand when I build the artifact — the system can't learn them
+  automatically, because a single successful run never actually sees its own failure cases.
+- **Base URL** — the one part of the file that changes if you point the same task at a different
+  bank/tenant. Everything else in the file stays the same.
 
 ## 3. Determinism & error handling
 
-Every locator resolves by trying the primary strategy, then falling through the ranked fallbacks,
-before failing (`PlaywrightAdapter._resolve_to_playwright`). Every step's `checkpoint` is a
-declared wait condition (`element_visible` / `url_matches` / `network_idle` / `element_hidden`) —
-never an assumption that the previous action just worked.
+Every step in Replay checks a **checkpoint** afterward — "did the page actually reach the state I
+expected," not just "did the click work without an error." If a locator (a way of finding an
+element) fails, the system tries the next backup locator before giving up.
 
-One correctness bug I caught and fixed while building this: a checkpoint built naively right after
-"type member_id, then click Search" would hardcode the *literal* path seen during discovery (e.g.
-`/member/12345`). That would only ever match a replay called with that exact member id, defeating
-the whole point of parameterizing it. `_templatized_path_pattern` (used by `Recorder`) replaces
-any occurrence of a known parameter's discovery-time raw value with a wildcard before saving the
-pattern, so `/member/12345` becomes `/member/[^/]+` in the artifact. (Covered by
-`src/recorder/test_recorder.py`.) This is the same idea as the canonicalization stretch goal in the
-assignment, applied somewhere it actually matters rather than as an optional extra.
+One bug I caught and fixed: when Discovery records a step like "search for member 12345," it
+would, by default, save the exact URL that resulted, like `/member/12345`. That's a problem,
+because Replay needs to work for *any* member ID, not just 12345. Fix: before saving, the system
+replaces the specific ID in that URL with a wildcard pattern, so it becomes `/member/[anything]`
+and works for every member.
 
-When a checkpoint fails, `error_taxonomy.classify_outcome` checks the live page against the
-artifact's declared `recognized_outcomes` for that step — and only those, matched by step id, not
-a blind scan of the whole page:
+When a checkpoint fails, the system checks the page against the list of "recognized outcomes" for
+that exact step:
 
-- **`business`** → returned to the caller as `status: "business_outcome"` with a named code
-  (`MEMBER_NOT_FOUND`, `PERMISSION_DENIED`, `INVALID_INITIAL_DEPOSIT`). Not treated as an error.
-- **`recoverable`** → the declared `recovery_action` runs once, the original checkpoint is checked
-  again, and only then does the run continue or fall through to a hard failure.
-- **`escalate`** → control passes to a human (§5).
-- **no match** → a genuine hard failure: `{step_id, expected, observed, message}`, plus a
-  screenshot and a fresh DOM snapshot, so it's debuggable without re-running anything.
+- **Business outcome** (e.g. "member not found") → this is a normal answer, not an error. Returned
+  to the caller as a clear, named result.
+- **Recoverable** → try the saved fix once (like clicking a "retry" button), check again, then
+  continue if it worked.
+- **Escalate** → stop and hand control to a human (see §5).
+- **No match at all** → a real failure. The system saves exactly what it expected, what it saw
+  instead, a screenshot, and the current page, so anyone can see what went wrong without having to
+  re-run anything.
 
-If the UI drifts in some other way — a selector quietly breaking — it surfaces the same way as any
-other state the system doesn't recognize: a hard failure naming the step and what was expected. It
-never gets silently retried into a false success.
+If the page changes in some way nobody planned for, it's treated the same as any unrecognized
+situation: a clear failure with evidence, never quietly ignored or retried into a fake success.
 
 ## 4. Heterogeneity & multi-tenant
 
-**Surface abstraction.** `SurfaceAdapter` (`src/surface/surface_adapter.py`, an `abc.ABC`) is the
-boundary: perceive, navigate, click, type_text, select_option, extract_text, wait_for, screenshot,
-get_handoff_url. Everything above it — agent, recorder, replay, policy — is written against this
-interface only. A legacy frameset app doesn't need a new abstraction, just an adapter that
-flattens frames into one snapshot (same interface, messier `css_path`/`xpath` fallbacks
-internally). A desktop app would need an adapter backed by an OS accessibility API (UIA/AT-SPI)
-instead of a DOM — `LocatorCandidate` already has room for that (a `role`+`role_name` strategy also
-makes sense on desktop accessibility trees). None of that would touch `ArtifactStep`,
-`RecognizedOutcome`, the Recorder, or the Replay Executor.
+**Different kinds of screens.** The Surface Adapter is the only part of the code that knows how to
+click, type, and read a specific kind of screen (right now: a web page, via Playwright). Everything
+else in the system only talks to this adapter, never to the browser directly. That means: to
+support an old-style multi-frame website, I would only need to change this one adapter. To support
+a desktop app instead of a website, I would write a new adapter for that, using the desktop's
+accessibility tools instead of a browser — nothing else in the system would need to change at all.
 
-**Multi-tenant reuse.** An artifact is written to not depend on a specific base URL:
-`target.base_url` is a single field, and `ReplayExecutor.run` already accepts a
-`base_url_override` per call — that's the mechanism for "one recording, many tenants." What
-doesn't transfer automatically is markup drift between tenants running a differently-skinned
-version of the same vendor product. The locator fallback chain absorbs small drift for free —
-role+name survives re-theming; only structural CSS/XPath breaks. For bigger drift, the design
-answer (not built here) is a **tenant override layer**: a small patch keyed by `(app_id,
-tenant_id)` that can swap one step's locator bundle or one recognized_outcome's matched text
-without touching the base artifact — plus a confidence/flakiness signal (stretch goal §8 in the
-assignment) that flags when an artifact's success rate drops for a specific tenant, so it gets
-re-reviewed instead of silently failing. I didn't build the override store or a drift detector. I
-kept the places they'd plug in (`base_url_override`, and locators stored as data rather than code)
-so adding them later is additive, not a rewrite.
+**Reusing the same task across different banks/tenants.** The base URL is the only thing in an
+artifact that's specific to one tenant, so a saved task can be replayed against a different bank's
+site just by swapping that one field. The backup locators (§1) already handle small visual
+differences for free. For bigger differences — a really differently designed version of the same
+screen — the right answer, which I designed for but did not build, is a small override file per
+tenant that can patch just the parts that differ, without touching the original saved task. I also
+did not build a way to automatically notice when a saved task starts failing more often for one
+tenant, though the design leaves room for it.
 
 ## 5. Escalation & handoff
 
-Control sits in exactly one place at a time — the automation, or a human — tracked by whichever
-one is currently driving the adapter. `EscalationManager.raise_intervention` (`src/escalation/`)
-is the only way to hand control from the first to the second. It takes a screenshot, writes an
-`InterventionRequest` (`runs/<runId>.intervention.json`), and starts a small Flask operator page
-(in a background thread, via `werkzeug.serving.make_server`, so it can be shut down cleanly) that
-shows the reason, the screenshot, and a link to the browser's own CDP endpoint
-(`PlaywrightAdapter.get_handoff_url`). That's genuinely the same live session — not a clone of it,
-not a replay. The calling loop then blocks in `wait_for_resolution`, polling for
-`runs/<runId>.resolution.json`.
+Only one side is ever in control at a time: either the automation, or a human. When the system
+needs a human, it takes a screenshot, writes down why, and opens a small web page (the "operator
+page") showing the reason, the screenshot, and a live link straight into the *same* browser window
+the automation was just using — not a copy of it, the actual same session. The automation then
+waits until a person resolves it.
 
-Four triggers, all exercised by this system:
-1. An irreversible step (`requires_approval: true`, e.g. the final "Confirm" click in
-   `open-sub-account`). Replay and discovery never auto-execute it.
-2. A `recognized_outcome` explicitly marked `kind: "escalate"` (session expiry — automatic
-   re-auth isn't wired to a credential store, so a human decides instead of a silent retry).
-3. Repeated action *failures*, or hitting a max-step/timeout limit, during discovery.
-4. The model repeating the identical *successful* action several turns in a row without making
-   progress — for example, re-typing a field that's already filled. This is a real failure mode I
-   saw in actual discovery runs, and it's different from (3): nothing throws an exception, each
-   action genuinely succeeds, it just never moves the task forward. Detected by comparing a
-   signature of consecutive decisions (tool name + target + value), not by watching for errors.
+Four situations cause this hand-off:
 
-**On resume, the code never re-runs the step that triggered escalation.** For an irreversible
-action, re-running it could double-submit something like a fund transfer if the human already did
-it live. Instead, resume just reads the current state and moves on. If the human declined, or
-never actually clicked through, the next checkpoint (or the artifact's `final_checkpoint`)
-correctly reports a hard failure instead of a false success. What gets logged for the audit trail:
-the operator's free-text note, a resolution timestamp, and a fresh screenshot at resume time — all
-written to `evidence/<runId>/log.jsonl` alongside everything else.
+1. **An irreversible action** (like the final "Confirm" click when opening an account). The system
+   never clicks this by itself — a human always has to approve it first.
+2. **A known risky outcome**, like a session expiring mid-task. Logging back in automatically isn't
+   safe without a stored password, so a human decides instead.
+3. **Repeated failures**, or running out of allowed steps, during Discovery.
+4. **Going in circles** — the model keeps successfully repeating the same action without making
+   progress (like re-typing a field that's already filled). I saw this happen in a real test run.
+   It's different from #3 because nothing actually fails — each action works, it just never moves
+   the task forward. The system watches for this by comparing the last few actions to each other.
 
-**What's intentionally mocked, per the assignment's own scope note:** the operator UI is a bare
-HTML form, not a full co-browsing tool, and the human's individual keystrokes/clicks aren't
-captured step by step — a real deployment would want the operator acting *through* the same
-Playwright `page` object, so every action is still recorded, which I noted but didn't build. What
-is real: the pause, the live session handoff, the resume signal, and the fact that a blocked
-process genuinely continues afterward. There's no separate "fake" resume path — `python -m src.cli
-resume` writes the exact same resolution file the operator page's form does.
+**When a human resolves it, the system never re-does the risky step by itself.** For something like
+a money transfer, blindly redoing it could cause it to happen twice. Instead, the system just looks
+at the current screen and continues from there. If the human didn't actually finish the step, the
+next check will correctly report a failure — it won't pretend everything worked.
+
+**What I simplified on purpose:** the operator page here is a plain form, not a full screen-sharing
+tool, and it doesn't record every single thing the human does by hand. A real production version
+would want to record the human's actions too. I noted this but didn't build it. What *is* real: the
+pause, the live hand-off, and the fact that the automation genuinely picks back up afterward.
 
 ## 6. Safety
 
-`PolicyEngine` (`src/policy/policy_engine.py`) checks every action, in both loops, against
-`src/config/allowlist.json`: allowed domains, allowed route patterns, allowed action types.
-Anything outside that list raises `PolicyViolationError` before it ever reaches the adapter.
-During discovery this goes straight to escalation instead of silently failing or retrying.
+Every single action, in both Discovery and Replay, is checked against an allow-list before it's
+allowed to happen: which websites, which pages, which kinds of actions are OK. Anything outside
+that list is blocked immediately and, during Discovery, triggers a hand-off to a human instead of
+silently failing or retrying.
 
-Risk classification is name-pattern-based (`confirm`, `delete`, `close account`, ...) plus an
-explicit hint from the model (`irreversible: true` on a `click` tool call). Either signal marks a
-step `irreversible`, and irreversible steps require human approval unconditionally, in both
-discovery and replay. This is deliberately conservative: a false positive costs one unnecessary
-escalation; a false negative risks an unauthorized money-moving action.
+An action is marked **risky** if its name matches a risky pattern (like "delete" or "confirm") or
+if the AI model itself flags it as risky. Either signal is enough — risky actions always need
+human approval, no exceptions, in both Discovery and Replay. I chose to be extra cautious here on
+purpose: the cost of asking a human unnecessarily is small; the cost of letting an unapproved
+money-moving action through is not.
 
-Redaction happens at two points, not one. First, live: `DiscoveryAgent` checks every typed field's
-locator against sensitive-name patterns (password, SSN, account number, ...) and forces it into a
-parameter if it matches, **regardless of whether the model flagged it**. This closes a real gap I
-found while building this: an unflagged login password would otherwise get baked into the artifact
-as a literal string. Making sensitivity detection independent of the model's own cooperation fixed
-that. Second, at every write boundary: `EvidenceStore`/`redaction.py` scrub named-sensitive fields
-and value-shaped secrets (SSN/card-number/API-key patterns) before anything touches `log.jsonl` or
-`transcript.json`. **Limits:** business data that isn't credential-shaped — an extracted balance,
-say — is not redacted from evidence. It's the capability's actual output, and blanket-redacting it
-would make the evidence useless for debugging. That's a deliberate scope line, written down here
-instead of left implicit.
+Sensitive information (passwords, account numbers) gets hidden in two separate places, not just
+one:
+
+1. While the task is running: the system checks every field name for sensitive words itself,
+   rather than trusting the AI model to notice and flag it. I found this gap myself during testing
+   — a password would otherwise have been saved in plain text if the model forgot to flag it — and
+   fixed it by not relying on the model at all for this check.
+2. Whenever anything is written to a log or evidence file: a separate cleanup step scrubs out
+   anything that looks like a password, SSN, or card number, right before it's saved.
+
+**One thing I chose not to hide:** normal business data, like an account balance, is not hidden in
+the evidence logs. It's the actual answer the task produced, and hiding it would make the logs
+useless for debugging. That's a deliberate choice, not an oversight.
 
 ## 7. Cuts
 
-- **Legacy-frameset and desktop adapters** — designed for (§4), not built. Only one
-  `SurfaceAdapter` (Playwright) exists.
-- **Tenant override store and artifact confidence/flakiness scoring** — the places they'd plug in
-  exist (`base_url_override`, `approval_state: draft/approved`, the `require_approved` gate in
-  `ReplayExecutor`), but the store and the scorer don't.
-- **Recoverable-outcome demo in the live app** — `attempt_recovery`'s `click` and `wait_and_retry`
-  paths are unit-tested (`src/replay/test_error_taxonomy.py`) but not exercised end-to-end against
-  the target app, since I didn't want to fake an interstitial just to hit the code path.
-  `reauthenticate` is an explicit no-op stub pending a real credential store; the target app
-  doesn't currently have a real recoverable UI state.
-- **Operator action capture during manual control** — the human's live actions aren't captured
-  step by step (§5); only a note and before/after evidence are.
-- **Per-step semantic checkpoints beyond URL/visibility** (e.g. "the balance cell contains a
-  positive number") — checkpoints confirm *reaching* a state, not deep-validating its content
-  beyond what extraction/transform already type-checks.
-- **No dispatcher in front of `discover`/`replay`.** Right now a human decides which command to
-  run; nothing in the system answers "does a capability for this request already exist" on its
-  own. I deliberately didn't fold that check into `ReplayExecutor` — its entire value is a narrow,
-  fast, fully predictable contract: same latency, same cost, same behavior every time. A silent
-  fallback into Discovery on a miss would break that guarantee for every caller, not just the miss
-  case. It would also risk quietly bypassing the `draft`/`approved` gate: "no artifact found →
-  auto-run Discovery → immediately replay the fresh result" would let an unreviewed capability act
-  on a real request with nobody having looked at it. The right shape is a separate, deliberately
-  simple coordinator in front of both: resolve by exact capability id first (the realistic case —
-  a calling agent already knows the name it wants, like a function name, not a vague sentence to
-  be matched), and if nothing matches, say so and stop rather than auto-triggering Discovery. A
-  human decides whether a new capability is worth teaching at all, and only then does Discovery
-  run.
+Things I designed for but did not build, and why:
+
+- **Adapters for other kinds of screens** (old multi-frame websites, desktop apps) — the design
+  supports adding these, but only one adapter (for regular web pages) actually exists.
+- **A per-tenant override file, and automatic detection of a task getting less reliable over
+  time** — the places in the code where these would plug in already exist; the actual features do
+  not.
+- **A live demo of the "retry once, then continue" recovery path** — the logic is tested by itself,
+  but I didn't fake a broken screen in the test app just to show it happening live end-to-end.
+- **Recording a human's actions step-by-step during a hand-off** — right now only a note and a
+  screenshot are saved, not every click the human makes.
+- **Checking the actual content of a result**, beyond "did we reach the right screen" — for
+  example, checking that a balance is a real positive number, not just that the balance field
+  exists.
+- **A dispatcher that decides which command to run.** Right now, a person has to decide by hand
+  whether to run Discovery (learn a new task) or Replay (repeat a known one). Nothing in the
+  system currently makes that call automatically. I chose not to build this, and not to make Replay
+  quietly fall back to Discovery when a task isn't found, on purpose: Replay's whole value is being
+  fast, cheap, and 100% predictable every time, and silently switching to Discovery would break
+  that promise. It could also let a brand-new, unreviewed task run for real before any human ever
+  looked at it. The right fix is a separate, simple piece in front of both: look for an exact match
+  first, and if nothing matches, stop and say so — a human should decide whether it's worth
+  teaching the system a new task, not have that decision made automatically.
+
+**What I'd build next:** that dispatcher, a shared list of "known outcomes" reused across tasks
+from the same vendor app (instead of writing them by hand every time), and the per-tenant override
+file — so a calling system could ask for a task by name and get either a fast known answer or a
+clear "I don't know this one yet," without a human running commands by hand.
+
 
 
