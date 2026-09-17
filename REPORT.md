@@ -159,38 +159,6 @@ one:
 2. Whenever anything is written to a log or evidence file: a separate cleanup step scrubs out
    anything that looks like a password, SSN, or card number, right before it's saved.
 
-**One thing I chose not to hide:** normal business data, like an account balance, is not hidden in
-the evidence logs. It's the actual answer the task produced, and hiding it would make the logs
-useless for debugging. That's a deliberate choice, not an oversight.
-
-## 7. Cuts
-
-Things I designed for but did not build, and why:
-
-- **Adapters for other kinds of screens** (old multi-frame websites, desktop apps) — the design
-  supports adding these, but only one adapter (for regular web pages) actually exists.
-- **A per-tenant override file, and automatic detection of a task getting less reliable over
-  time** — the places in the code where these would plug in already exist; the actual features do
-  not.
-- **A live demo of the "retry once, then continue" recovery path** — the logic is tested by itself,
-  but I didn't fake a broken screen in the test app just to show it happening live end-to-end.
-- **Recording a human's actions step-by-step during a hand-off** — right now only a note and a
-  screenshot are saved, not every click the human makes.
-- **Checking the actual content of a result**, beyond "did we reach the right screen" — for
-  example, checking that a balance is a real positive number, not just that the balance field
-  exists.
-- **A dispatcher that decides which command to run.** Right now, a person has to decide by hand
-  whether to run Discovery (learn a new task) or Replay (repeat a known one). Nothing in the
-  system currently makes that call automatically. I chose not to build this, and not to make Replay
-  quietly fall back to Discovery when a task isn't found, on purpose: Replay's whole value is being
-  fast, cheap, and 100% predictable every time, and silently switching to Discovery would break
-  that promise. It could also let a brand-new, unreviewed task run for real before any human ever
-  looked at it. The right fix is a separate, simple piece in front of both: look for an exact match
-  first, and if nothing matches, stop and say so — a human should decide whether it's worth
-  teaching the system a new task, not have that decision made automatically.
-
-**What I'd build next:** that dispatcher, a shared list of "known outcomes" reused across tasks
-from the same vendor app (instead of writing them by hand every time), and the per-tenant override
 file — so a calling system could ask for a task by name and get either a fast known answer or a
 clear "I don't know this one yet," without a human running commands by hand.
 
