@@ -159,8 +159,3 @@ one:
 2. Whenever anything is written to a log or evidence file: a separate cleanup step scrubs out
    anything that looks like a password, SSN, or card number, right before it's saved.
 
-file — so a calling system could ask for a task by name and get either a fast known answer or a
-clear "I don't know this one yet," without a human running commands by hand.
-
-
-
